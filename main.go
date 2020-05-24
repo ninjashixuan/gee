@@ -2,31 +2,29 @@ package main
 
 import (
 	"fmt"
-	"gee/gee"
-	"io/ioutil"
+	"gee/geecache"
 	"log"
 	"net/http"
 )
 
+var db = map[string]string{
+	"Tom":  "630",
+	"Jack": "589",
+	"Sam":  "567",
+}
 
 func main() {
-	r := gee.New()
+	geecache.NewGroup("scores", 2<<10, geecache.GetterFunc(
+		func(key string) ([]byte, error) {
+			log.Println("[SlowDB] search key", key)
+			if v, ok := db[key]; ok {
+				return []byte(v), nil
+			}
+			return nil, fmt.Errorf("%s not exist", key)
+		}))
 
-	r.Get("/hello", func(c *gee.Context) {
-		c.String(http.StatusOK, "hell world!")
-	})
-
-	r.POST("/hello", func(c *gee.Context) {
-		data, err := ioutil.ReadAll(c.Req.Body)
-		if err != nil {
-			c.String(http.StatusInternalServerError, "心累服务器崩了")
-		}
-
-		defer c.Req.Body.Close()
-
-		fmt.Println(string(data))
-
-	})
-
-	log.Fatal(r.Run(":8000"))
+	addr := "localhost:9999"
+	peers := geecache.NewHTTPPool(addr)
+	log.Println("geecache is running at", addr)
+	log.Fatal(http.ListenAndServe(addr, peers))
 }
