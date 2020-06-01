@@ -2,6 +2,7 @@ package geecache
 
 import (
 	"fmt"
+	"gee/geecache/singleflight"
 	"log"
 	"sync"
 )
@@ -12,6 +13,8 @@ type Group struct {
 	mainCache cache
 
 	peers PeerPicker
+
+	loader *singleflight.Group
 }
 
 var (
@@ -31,6 +34,7 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 		name:      name,
 		mainCache: cache{cacheBytes: cacheBytes},
 		getter:    getter,
+		loader:    &singleflight.Group{},
 	}
 
 	groups[name] = group
@@ -67,16 +71,24 @@ func (g *Group) Get(key string) (ByteView, error) {
 }
 
 func (g *Group) load(key string) (value ByteView, err error) {
-	if g.peers != nil {
-		if peers, ok := g.peers.PeerPicker(key); ok {
-			if value, err = g.getFromPeer(peers, key); err == nil {
-				return value, nil
-			}
-			log.Println("[GeeCache] Failed to get from peer", err)
 
+	view, err := g.loader.Do(key, func() (interface{}, error) {
+		if g.peers != nil {
+			if peer, ok := g.peers.PeerPicker(key); ok {
+				if value, err = g.getFromPeer(peer, key); err == nil {
+					return value, nil
+				}
+				log.Println("[GeeCache] Failed to get from peer", err)
+			}
 		}
+
+		return g.getLocally(key)
+	})
+
+	if err == nil {
+		return view.(ByteView), nil
 	}
-	return g.getLocally(key)
+	return
 }
 
 func (g *Group) getFromPeer(peer PeerGetter, key string) (ByteView, error) {
